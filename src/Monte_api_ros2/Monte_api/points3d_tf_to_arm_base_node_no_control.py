@@ -1,7 +1,6 @@
 import os
 import sys
 import math
-import time
 import numpy as np
 import rclpy
 from rclpy.node import Node
@@ -126,16 +125,6 @@ class Points3DTFToArmBaseNode(Node):
         self.declare_parameter('target_frame', 'link_r0_arm_base')
         self.declare_parameter('publish_transformed', True)
         self.declare_parameter('print_limit', 10)
-        # 粗定位控制参数
-        self.declare_parameter('enable_coarse_move', True)
-        self.declare_parameter('component_type', 2)  # 1: 左臂  2: 右臂
-        self.declare_parameter('distance_stop', 0.5)  # m
-        self.declare_parameter('step_size', 0.10)     # 每步前进距离 m
-        self.declare_parameter('cmd_interval', 0.3)   # 连续set_arm_position发送最小间隔 s（当wait=False）
-        self.declare_parameter('max_speed', 0.10)     # m/s
-        self.declare_parameter('max_acc', 0.50)       # m/s^2
-        self.declare_parameter('use_wait', False)     # set_arm_position 的 wait
-        self.declare_parameter('target_id', -1)       # 若>=0，则优先匹配channel 'id'
         # 外参文件 + 方向 + 坐标系约定
         self.declare_parameter('wrist_extrinsic_file', '/home/root1/Corenetic/code/project/tracking_with_cameara_ws/joint_r7_wrist_roll.txt')
         self.declare_parameter('invert_extrinsic', False)  # 若文件给的是 T_{source<-wrist}，则置 True 取逆
@@ -191,32 +180,6 @@ class Points3DTFToArmBaseNode(Node):
         if self.publish_transformed:
             self.pub = self.create_publisher(PointCloud, 'tracking/points3d_in_arm_base', 10)
 
-        # ---- 粗定位控制相关 ----
-        self.enable_coarse_move = bool(self.get_parameter('enable_coarse_move').value)
-
-        # >>> 新增：安全与失败计数 <<<
-        self._last_log_ts = 0.0
-        self._move_fail_count = 0
-        self._max_fail_count = 3  # 连续失败3次就暂停
-
-        self.component_type = int(self.get_parameter('component_type').value)
-        self.distance_stop = float(self.get_parameter('distance_stop').value)
-        self.step_size = float(self.get_parameter('step_size').value)
-        self.cmd_interval = float(self.get_parameter('cmd_interval').value)
-        self.max_speed = float(self.get_parameter('max_speed').value)
-        self.max_acc = float(self.get_parameter('max_acc').value)
-        self.use_wait = bool(self.get_parameter('use_wait').value)
-        self.target_id = int(self.get_parameter('target_id').value)
-
-        # 最新目标点（Base系）与平滑缓存
-        self.target_point = None
-        self.last_cmd_ts = 0.0
-        self.cached_quat_wxyz = None  # 保持当前姿态
-
-        if self.enable_coarse_move:
-            self.timer_ctrl = self.create_timer(0.05, self.control_loop)  # 20Hz
-            self.get_logger().info(f"粗定位控制已启用: stop={self.distance_stop}m, step={self.step_size}m, wait={self.use_wait}")
-
     def _extract_channel(self, msg: PointCloud, name: str):
         try:
             for ch in msg.channels:
@@ -255,7 +218,7 @@ class Points3DTFToArmBaseNode(Node):
             return
 
         ids = self._extract_channel(msg, 'id')
-        # self._log_points(np.array(pts_optical), self.source_frame, '源(光学)', ids, self.print_limit)
+        self._log_points(np.array(pts_optical), self.source_frame, '源(光学)', ids, self.print_limit)
 
         # Step 0: optical → camera（默认恒等，与参考代码一致）
         pts_camera = []
@@ -266,7 +229,7 @@ class Points3DTFToArmBaseNode(Node):
             for p_opt in pts_optical:
                 p_cam = R_cam_from_opt @ p_opt
                 pts_camera.append(p_cam)
-            # self._log_points(np.array(pts_camera), f'{self.source_frame}_camera', '源(相机)', ids, self.print_limit)
+            self._log_points(np.array(pts_camera), f'{self.source_frame}_camera', '源(相机)', ids, self.print_limit)
         else:
             pts_camera = pts_optical  # 与参考代码 _optical_to_camera() 行为一致
 
@@ -275,7 +238,7 @@ class Points3DTFToArmBaseNode(Node):
         for p_cam in pts_camera:
             p_wr = self.R_cam2wrist @ p_cam + self.t_cam2wrist
             pts_wrist.append(p_wr)
-        # self._log_points(np.array(pts_wrist), self.wrist_frame, '手腕', ids, self.print_limit)
+        self._log_points(np.array(pts_wrist), self.wrist_frame, '手腕', ids, self.print_limit)
 
         # Step 2: wrist → base
         try:
@@ -283,7 +246,7 @@ class Points3DTFToArmBaseNode(Node):
             if not ok or tf_bw is None or len(tf_bw) < 7:
                 self.get_logger().warn(f'获取TF失败 {self.target_frame} <- {self.wrist_frame}')
                 return
-            # [tx, ty, tz, qw, qx, qy, qz]
+            # 解包: [tx, ty, tz, qw, qx, qy, qz] —— 与参考代码完全一致
             tx, ty, tz, qw, qx, qy, qz = [float(tf_bw[i]) for i in range(7)]
             R_wb = quat_to_rot(qx, qy, qz, qw)  # wrist → base
             t_wb = np.array([tx, ty, tz], dtype=float)
@@ -314,124 +277,6 @@ class Points3DTFToArmBaseNode(Node):
             out_msg.points = [Point32(x=float(p[0]), y=float(p[1]), z=float(p[2])) for p in pts_base]
             out_msg.channels = msg.channels
             self.pub.publish(out_msg)
-
-        # 缓存基座系点用于粗定位控制
-        if self.enable_coarse_move:
-            self.latest_pts_base = pts_base
-            self.latest_ids = ids
-            # 选择目标点：优先匹配target_id，否则取第一个
-            target = None
-            if self.target_id >= 0 and ids is not None:
-                for i, p in enumerate(pts_base):
-                    try:
-                        if int(ids[i]) == self.target_id:
-                            target = p
-                            break
-                    except Exception:
-                        continue
-            if target is None and len(pts_base) > 0:
-                target = pts_base[0]
-
-            # >>> 新增：安全过滤 <<<
-            valid_target = None
-            if target is not None:
-                target = np.array(target, dtype=float)
-                dist_from_base = np.linalg.norm(target)
-                z_val = target[2]
-
-                # 条件1: 距离 <= 2.0m
-                # 条件2: Z轴的上下限 -1.0 <= Z <= 0.0 
-                if dist_from_base <= 2.0 and (-1.0 <= z_val <= 0.0):
-                    valid_target = target
-                else:
-                    self.get_logger().warn(
-                        f'目标点被过滤: distance={dist_from_base:.3f}m, Z={z_val:.3f} (要求: dist≤2.0m 且 -1.0≤Z≤0.0)'
-                    )
-            # <<<
-
-            self.target_point = valid_target
-
-    # ------------------- 末端粗定位控制（基于 set_arm_position） -------------------
-    def _get_arm_position(self):
-        """读取当前末端位姿(基于对应臂的base)，返回 (ok, p_base_xyz, quat_wxyz)
-        依照接口文档：pose = [x,y,z,w,x,y,z]
-        """
-        try:
-            ok, pose = self.robot.get_arm_position(self.component_type)
-            if ok and pose and len(pose) >= 7:
-                x, y, z, qw, qx, qy, qz = [float(v) for v in pose[:7]]
-                return True, np.array([x, y, z], dtype=float), np.array([qw, qx, qy, qz], dtype=float)
-        except Exception as e:
-            self.get_logger().warn(f'get_arm_position 异常: {e}')
-        return False, None, None
-
-    def _build_pose_wxyz(self, p_xyz, quat_wxyz):
-        return [float(p_xyz[0]), float(p_xyz[1]), float(p_xyz[2]), float(quat_wxyz[0]), float(quat_wxyz[1]), float(quat_wxyz[2]), float(quat_wxyz[3])]
-
-    def control_loop(self):
-        if not self.enable_coarse_move or self.robot is None:
-            return
-        if self.target_point is None:
-            return
-        ok, p_curr, quat_wxyz = self._get_arm_position()
-        if not ok:
-            return
-        # 首次缓存姿态，粗定位阶段保持
-        if self.cached_quat_wxyz is None:
-            self.cached_quat_wxyz = quat_wxyz
-
-        # 误差与距离
-        e = self.target_point - p_curr
-        d = float(np.linalg.norm(e))
-
-        # 日志：1Hz
-        if not hasattr(self, '_last_log_ts'):
-            self._last_log_ts = 0.0
-        now = time.time()
-        if now - self._last_log_ts > 1.0:
-            self.get_logger().info(f'[粗定位] dist={d:.3f} m, curr=({p_curr[0]:.3f},{p_curr[1]:.3f},{p_curr[2]:.3f}), target=({self.target_point[0]:.3f},{self.target_point[1]:.3f},{self.target_point[2]:.3f})')
-            self._last_log_ts = now
-
-        # 到达阈值则不再发送
-        if d <= self.distance_stop:
-            return
-
-        # 计算一步目标（不越过阈值）
-        if d > 1e-6:
-            step = min(self.step_size, max(0.0, d - self.distance_stop))
-            p_next = p_curr + (e / d) * step
-        else:
-            p_next = p_curr.copy()
-
-        pose_next = self._build_pose_wxyz(p_next, self.cached_quat_wxyz)
-
-        # 频率/等待控制
-        try:
-            cmd_ok = False
-            if self.use_wait:
-                # 阻塞式：调用即等待完成
-                self.robot.set_arm_position(self.component_type, pose_next, float(self.max_speed), float(self.max_acc), True)
-                cmd_ok = True
-                self.last_cmd_ts = now
-            else:
-                if (now - self.last_cmd_ts) >= self.cmd_interval:
-                    self.robot.set_arm_position(self.component_type, pose_next, float(self.max_speed), float(self.max_acc), False)
-                    cmd_ok = True
-                    self.last_cmd_ts = now
-
-            if cmd_ok:
-                self._move_fail_count = 0  # 成功则清零
-            else:
-                # 非发送时机，不算失败
-                pass
-
-        except Exception as e:
-            self.get_logger().warn(f'set_arm_position 失败: {e}')
-            self._move_fail_count += 1
-
-            if self._move_fail_count >= self._max_fail_count:
-                self.get_logger().error(f'❌ 粗定位连续失败 {self._max_fail_count} 次，暂停控制')
-                self.enable_coarse_move = False  # 自动关闭
 
 
 def main(args=None):
