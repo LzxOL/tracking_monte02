@@ -93,13 +93,13 @@ class Points3DTestPublisher(Node):
     def __init__(self):
         super().__init__('points3d_test_publisher')
 
-        # 声明参数
+        # 声明参数 #0: X=0.0180 Y=0.1162 Z=0.7720
         # self.declare_parameter('x', 0.1534)
         # self.declare_parameter('y', -0.0333)
         # self.declare_parameter('z', 0.6010)
-        self.declare_parameter('x', -0.035)
-        self.declare_parameter('y', 0.5135)
-        self.declare_parameter('z', 2.116)
+        self.declare_parameter('x', 0.0180)
+        self.declare_parameter('y', 0.1162)
+        self.declare_parameter('z', 0.7720)
         self.declare_parameter('id', 1)
         self.declare_parameter('publish_rate', 5.0)
 
