@@ -21,6 +21,7 @@ def _ensure_robotlib_visible(robot_lib_path: str):
 
 
 def quat_to_rot(qx: float, qy: float, qz: float, qw: float) -> np.ndarray:
+    """Convert quaternion (qx,qy,qz,qw) to rotation matrix"""
     norm = math.sqrt(qx*qx + qy*qy + qz*qz + qw*qw)
     if norm == 0:
         return np.eye(3, dtype=float)
@@ -37,9 +38,11 @@ def quat_to_rot(qx: float, qy: float, qz: float, qw: float) -> np.ndarray:
 
 
 def rpy_to_rot(roll: float, pitch: float, yaw: float) -> np.ndarray:
+    """Convert roll-pitch-yaw (XYZ intrinsic) to rotation matrix (ROS convention)"""
     cr, sr = math.cos(roll), math.sin(roll)
     cp, sp = math.cos(pitch), math.sin(pitch)
     cy, sy = math.cos(yaw), math.sin(yaw)
+    # Rotation: R = Rz(yaw) @ Ry(pitch) @ Rx(roll)
     Rz = np.array([[cy, -sy, 0], [sy, cy, 0], [0, 0, 1]], dtype=float)
     Ry = np.array([[cp, 0, sp], [0, 1, 0], [-sp, 0, cp]], dtype=float)
     Rx = np.array([[1, 0, 0], [0, cr, -sr], [0, sr, cr]], dtype=float)
@@ -47,6 +50,7 @@ def rpy_to_rot(roll: float, pitch: float, yaw: float) -> np.ndarray:
 
 
 def load_wrist_extrinsic(path: str):
+    """Load camera→wrist extrinsic from YAML-like file"""
     vals = {}
     with open(path, 'r') as f:
         for ln in f:
@@ -55,8 +59,9 @@ def load_wrist_extrinsic(path: str):
                 continue
             if ':' in ln:
                 k, v = ln.split(':', 1)
-                k = k.strip(); v = v.strip()
-                if k in ('joint_r7_wrist_roll','joint_l7_wrist_roll'):
+                k = k.strip()
+                v = v.strip()
+                if k in ('joint_r7_wrist_roll', 'joint_l7_wrist_roll'):
                     continue
                 try:
                     vals[k] = float(v)
@@ -74,6 +79,7 @@ def load_wrist_extrinsic(path: str):
 
 
 def invert_rt(R: np.ndarray, t: np.ndarray):
+    """Invert rigid transform: [R|t] => [R.T | -R.T @ t]"""
     Rt = R.T
     tinv = -Rt @ t
     return Rt, tinv
@@ -81,24 +87,22 @@ def invert_rt(R: np.ndarray, t: np.ndarray):
 
 class Points3DTestPublisher(Node):
     """
-    参考 points3d_tf_to_arm_base_node 的逻辑：
-    - 周期性向 tracking/points3d 发布固定点 (光学坐标)
-    - 同时在本节点内部按与转换节点一致的链路计算并打印：
-        源(光学) → 相机(笛卡尔, 可选) → 手腕 → 基座(link_r0_arm_base)
-    - 也订阅 tracking/points3d_in_arm_base 用于对照（若转换节点在运行）
+    测试节点：optical → (camera) → wrist → base
     """
 
     def __init__(self):
         super().__init__('points3d_test_publisher')
 
-        # 固定点参数
-        self.declare_parameter('x', 0.2230)
-        self.declare_parameter('y', -0.1214)
-        self.declare_parameter('z', 0.2500)
-        self.declare_parameter('id', 0)
+        # 声明参数
+        # self.declare_parameter('x', 0.1534)
+        # self.declare_parameter('y', -0.0333)
+        # self.declare_parameter('z', 0.6010)
+        self.declare_parameter('x', -0.035)
+        self.declare_parameter('y', 0.5135)
+        self.declare_parameter('z', 2.116)
+        self.declare_parameter('id', 1)
         self.declare_parameter('publish_rate', 5.0)
 
-        # 坐标/话题参数
         self.declare_parameter('input_topic', 'tracking/points3d')
         self.declare_parameter('base_topic', 'tracking/points3d_in_arm_base')
         self.declare_parameter('source_frame', 'right_camera_color_optical_frame')
@@ -106,12 +110,10 @@ class Points3DTestPublisher(Node):
         self.declare_parameter('target_frame', 'link_r0_arm_base')
         self.declare_parameter('subscribe_base', True)
 
-        # 外参与选项
         self.declare_parameter('wrist_extrinsic_file', '/home/root1/Corenetic/code/project/tracking_with_cameara_ws/joint_r7_wrist_roll.txt')
         self.declare_parameter('invert_extrinsic', False)
-        self.declare_parameter('apply_optical_to_camera_rotation', True)
+        self.declare_parameter('apply_optical_to_camera_rotation', False)
 
-        # RobotLib
         try:
             from ament_index_python.packages import get_package_share_directory
             default_lib = os.path.join(get_package_share_directory('Monte_api_ros2'), 'lib')
@@ -136,12 +138,8 @@ class Points3DTestPublisher(Node):
 
         self.wrist_extrinsic_file = self.get_parameter('wrist_extrinsic_file').value
         self.invert_extrinsic = bool(self.get_parameter('invert_extrinsic').value)
-        self.apply_optical_to_camera_rotation = bool(self.get_parameter('apply_optical_to_camera_rotation').value)
 
-        robot_ip = self.get_parameter('robot_ip').value
-        robot_lib_path = self.get_parameter('robot_lib_path').value
-
-        # 发布/订阅
+        # 发布者 / 订阅者
         self.pub = self.create_publisher(PointCloud, self.input_topic, 10)
         if self.subscribe_base:
             self.sub_base = self.create_subscription(
@@ -150,28 +148,31 @@ class Points3DTestPublisher(Node):
         else:
             self.sub_base = None
 
-        # 载入外参
+        # 载入外参：camera → wrist
         try:
             R_ext, t_ext = load_wrist_extrinsic(self.wrist_extrinsic_file)
             if self.invert_extrinsic:
                 R_ext, t_ext = invert_rt(R_ext, t_ext)
-            self.R_src2wrist = R_ext
-            self.t_src2wrist = t_ext
-            self.get_logger().info(
-                f'外参 OK: t=({self.t_src2wrist[0]:.6f},{self.t_src2wrist[1]:.6f},{self.t_src2wrist[2]:.6f})')
-        except Exception as e:
-            self.get_logger().error(f'解析外参失败: {e}')
-            self.R_src2wrist = np.eye(3, dtype=float)
-            self.t_src2wrist = np.zeros(3, dtype=float)
 
-        # 连接 RobotLib
-        _ensure_robotlib_visible(robot_lib_path)
-        try:
-            from RobotLib import Robot  # type: ignore
-            self.robot = Robot(robot_ip, '', '')
-            self.get_logger().info('Robot connected successfully')
+            self.R_cam2wrist = R_ext
+            self.t_cam2wrist = t_ext
+            self.get_logger().info(f'✅ 加载相机→wrist 外参成功: t={self.t_cam2wrist}, R=\n{self.R_cam2wrist}')
         except Exception as e:
-            self.get_logger().error(f'导入/连接 RobotLib 失败: {e}')
+            self.get_logger().error(f'❌ 外参加载失败，使用单位变换: {e}')
+            self.R_cam2wrist = np.eye(3)
+            self.t_cam2wrist = np.zeros(3)
+
+        # RobotLib 连接
+        robot_ip = self.get_parameter('robot_ip').value
+        robot_lib_path = self.get_parameter('robot_lib_path').value
+        _ensure_robotlib_visible(robot_lib_path)
+
+        try:
+            from RobotLib import Robot
+            self.robot = Robot(robot_ip, '', '')
+            self.get_logger().info('✅ Robot connected successfully')
+        except Exception as e:
+            self.get_logger().error(f'❌ 导入 RobotLib 失败: {e}')
             self.robot = None
 
         # 定时器
@@ -179,66 +180,52 @@ class Points3DTestPublisher(Node):
         self.timer = self.create_timer(period, self.timer_cb)
 
         self.get_logger().info(
-            f'发布固定点到 {self.input_topic}, frame="{self.source_frame}", '
-            f'point=({self.pt_x:.4f}, {self.pt_y:.4f}, {self.pt_z:.4f}), id={self.pt_id}')
-        if self.sub_base is not None:
-            self.get_logger().info(f'订阅转换后的点: {self.base_topic}')
+            f'📌 发布固定点到 {self.input_topic}, point=({self.pt_x},{self.pt_y},{self.pt_z})'
+        )
 
     def _optical_to_camera(self, pts: np.ndarray) -> np.ndarray:
-        if not self.apply_optical_to_camera_rotation:
-            return pts
-        R_cam_opt = np.array([[0, 0, 1],
-                              [-1, 0, 0],
-                              [0, -1, 0]], dtype=float)
-        return (R_cam_opt @ pts.T).T
+        # Astra / RealSense optical == camera? Assume identity
+        return pts
 
     def timer_cb(self):
-        # 构造并发布源(光学)点
+        # 发布 PointCloud（用于可视化）
         msg = PointCloud()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = self.source_frame
         msg.points = [Point32(x=self.pt_x, y=self.pt_y, z=self.pt_z)]
-        ch = ChannelFloat32(); ch.name = 'id'; ch.values = [float(self.pt_id)]
+        ch = ChannelFloat32()
+        ch.name = 'id'
+        ch.values = [float(self.pt_id)]
         msg.channels = [ch]
         self.pub.publish(msg)
 
-        # 在本节点内部做同样的变换链路并打印结果
-        src = np.array([[self.pt_x, self.pt_y, self.pt_z]], dtype=float)
-        self.get_logger().info(f'[TEST] 源(光学) #{self.pt_id}: X={self.pt_x:.6f} Y={self.pt_y:.6f} Z={self.pt_z:.6f}')
+        # Step 0: 光学系（假设 = 相机系）
+        p_optical = np.array([self.pt_x, self.pt_y, self.pt_z])
+        self.get_logger().info(f'[TEST] 光学/相机系: {p_optical}')
 
-        cam = self._optical_to_camera(src)
-        if self.apply_optical_to_camera_rotation:
-            x, y, z = cam[0]
-            self.get_logger().info(f'[TEST] 源(相机笛卡尔) #{self.pt_id}: X={x:.6f} Y={y:.6f} Z={z:.6f}')
-            src_pts = cam
-        else:
-            src_pts = src
+        # Step 1: camera → wrist
+        p_wrist = self.R_cam2wrist @ p_optical + self.t_cam2wrist
+        self.get_logger().info(f'[TEST] 手腕系 (wrist): {p_wrist}')
 
-        wrist = (self.R_src2wrist @ src_pts.T).T + self.t_src2wrist.reshape(1, 3)
-        wx, wy, wz = wrist[0]
-        self.get_logger().info(f'[TEST] 手腕 {self.wrist_frame} #{self.pt_id}: X={wx:.6f} Y={wy:.6f} Z={wz:.6f}')
-
+        # Step 2: wrist → base
         if self.robot is not None:
-            try:
-                ok, tf_base_wrist = self.robot.get_tf_transform(self.target_frame, self.wrist_frame)
-                # print(f"get_tf_transform success: {ok}, transform: {tf_base_wrist}")
-                if ok and tf_base_wrist is not None and len(tf_base_wrist) >= 7:
-                    tx, ty, tz, qx, qy, qz, qw = [float(tf_base_wrist[i]) for i in range(7)]
-                    R_base_wrist = quat_to_rot(qx, qy, qz, qw)
-                    t_base_wrist = np.array([tx, ty, tz], dtype=float)
-                    base = (R_base_wrist @ wrist.T).T + t_base_wrist.reshape(1, 3)
-                    bx, by, bz = base[0]
-                    self.get_logger().info(f'[TEST] 基座 {self.target_frame} #{self.pt_id}: X={bx:.6f} Y={by:.6f} Z={bz:.6f}')
-                else:
-                    self.get_logger().warn(f'[TEST] 获取TF失败 {self.target_frame} <- {self.wrist_frame}')
-            except Exception as e:
-                self.get_logger().warn(f'[TEST] TF异常: {e}')
+            ok, tf_bw = self.robot.get_tf_transform(self.target_frame, self.wrist_frame)
+            if ok and tf_bw is not None and len(tf_bw) >= 7:
+                tx, ty, tz, qw, qx, qy, qz = [float(tf_bw[i]) for i in range(7)]
+                R_wb = quat_to_rot(qx, qy, qz, qw)  # wrist → base
+                t_wb = np.array([tx, ty, tz])
+                p_base = R_wb @ p_wrist + t_wb
+                self.get_logger().info(f'[TEST] 基座系 (base): {p_base}')
+            else:
+                self.get_logger().warn('[TEST] 获取 TF 失败')
+        else:
+            self.get_logger().warn('[TEST] Robot 未连接')
 
     def cb_base(self, msg: PointCloud):
         if not msg.points:
             return
         p = msg.points[0]
-        self.get_logger().info(f'[SUB BASE] {msg.header.frame_id} #{self.pt_id}: X={p.x:.6f} Y={p.y:.6f} Z={p.z:.6f}')
+        self.get_logger().info(f'[SUB BASE] {msg.header.frame_id}: ({p.x:.4f}, {p.y:.4f}, {p.z:.4f})')
 
 
 def main(args=None):

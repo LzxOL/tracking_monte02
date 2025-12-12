@@ -242,6 +242,9 @@ class Points3DTFToArmBaseNode(Node):
         # Step2: 用 RobotLib TF：target <- wrist
         try:
             ok, tf_base_wrist = self.robot.get_tf_transform(self.target_frame, self.wrist_frame)
+            print(f"get_tf_transform success: {ok}, transform: {tf_base_wrist}")
+            print(f"get_tf_transform success: {ok}, transform: {tf_base_wrist}")
+            print(f"get_tf_transform success: {ok}, transform: {tf_base_wrist}")            
             if not ok or tf_base_wrist is None or len(tf_base_wrist) < 7:
                 self.get_logger().warn(f'获取TF失败 {self.target_frame} <- {self.wrist_frame}')
                 return
