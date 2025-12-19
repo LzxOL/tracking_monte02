@@ -843,31 +843,14 @@ class TrackCameraFrontMinNode(Node):
                 continue
             
             # 检查1: 深度是否突然变大（跟丢到背景）
-            # 初始深度只用于第一次背景判别
             is_background = current_depth > self.background_depth_threshold
             
-            # 检查2: 深度变化是否过大（使用最近N帧的滑动中值作为参考）
+            # 检查2: 深度变化是否过大
             depth_change_ok = True
-            reference_depth = None
-            
-            # 优先使用深度历史的滑动中值
-            if i in self.depth_history and len(self.depth_history[i]) >= 3:
-                # 使用最近3帧的中值作为参考
-                recent_depths = self.depth_history[i][-3:]
-                reference_depth = float(np.median(recent_depths))
-                depth_change = abs(current_depth - reference_depth)
+            if i in self.initial_depths:
+                initial_depth = self.initial_depths[i]
+                depth_change = abs(current_depth - initial_depth)
                 depth_change_ok = depth_change <= self.max_depth_change
-            elif i in self.depth_history and len(self.depth_history[i]) > 0:
-                # 如果历史不足3帧，使用平均值
-                reference_depth = np.mean(self.depth_history[i])
-                depth_change = abs(current_depth - reference_depth)
-                depth_change_ok = depth_change <= self.max_depth_change
-            elif i in self.initial_depths:
-                # 如果没有历史，使用初始深度（仅用于粗分类）
-                reference_depth = self.initial_depths[i]
-                # 对于初始帧，放宽限制（允许更大的变化）
-                depth_change = abs(current_depth - reference_depth)
-                depth_change_ok = depth_change <= self.max_depth_change * 1.5
             
             # 如果检测到问题，尝试修正
             if is_background or not depth_change_ok:
@@ -941,18 +924,12 @@ class TrackCameraFrontMinNode(Node):
         predicted_x = prev_x + dx
         predicted_y = prev_y + dy
         
-        # 目标深度：优先使用最近N帧的滑动中值
+        # 目标深度（使用初始深度或历史平均深度）
         target_depth = None
-        if point_id in self.depth_history and len(self.depth_history[point_id]) >= 3:
-            # 使用最近3帧的中值
-            recent_depths = self.depth_history[point_id][-3:]
-            target_depth = float(np.median(recent_depths))
-        elif point_id in self.depth_history and len(self.depth_history[point_id]) > 0:
-            # 如果历史不足3帧，使用平均值
-            target_depth = np.mean(self.depth_history[point_id])
-        elif point_id in self.initial_depths:
-            # 最后回退到初始深度（仅用于第一次搜索）
+        if point_id in self.initial_depths:
             target_depth = self.initial_depths[point_id]
+        elif point_id in self.depth_history and len(self.depth_history[point_id]) > 0:
+            target_depth = np.mean(self.depth_history[point_id])
         
         # 在预测位置附近搜索有效点
         h, w = frame.shape[:2]
