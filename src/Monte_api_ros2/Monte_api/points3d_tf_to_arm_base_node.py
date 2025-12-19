@@ -41,14 +41,16 @@ class Points3DTFToArmBaseNode(Node):
         self.declare_parameter('enable_coarse_move', True)
         self.declare_parameter('component_type', 2)  # 1: 左臂  2: 右臂
         self.declare_parameter('distance_stop', 0.5)  # m
-        self.declare_parameter('step_size', 0.10)     # 每步前进距离 m
+        self.declare_parameter('step_size', 0.08)     # 每步前进距离 m
         self.declare_parameter('cmd_interval', 0.3)   # 连续set_arm_position发送最小间隔 s（当wait=False）
         self.declare_parameter('max_speed', 0.10)     # m/s
         self.declare_parameter('max_acc', 0.15)       # m/s^2
         self.declare_parameter('use_wait', False)     # set_arm_position 的 wait
         self.declare_parameter('target_id', -1)       # 若>=0，则优先匹配channel 'id'
         # 外参文件 + 方向 + 坐标系约定
-        self.declare_parameter('wrist_extrinsic_file', '/home/root1/Corenetic/code/project/tracking_with_cameara_ws/joint_r7_wrist_roll.txt')
+        ws_root = self._get_workspace_root()
+        default_extrinsic = os.path.join(ws_root, 'joint_r7_wrist_roll.txt') if ws_root else ''
+        self.declare_parameter('wrist_extrinsic_file', default_extrinsic)
         self.declare_parameter('invert_extrinsic', False)  # 若文件给的是 T_{source<-wrist}，则置 True 取逆
         # 若外参以相机笛卡尔坐标（x前,y左,z上）为源，而输入为光学坐标（x右,y下,z前），需先做 optical->camera 固定旋转
         self.declare_parameter('apply_optical_to_camera_rotation', False)  # 与参考代码一致，默认 False
@@ -169,6 +171,19 @@ class Points3DTFToArmBaseNode(Node):
         if self.enable_coarse_move:
             self.timer_ctrl = self.create_timer(0.05, self.control_loop)  # 20Hz
             self.get_logger().info(f"粗定位控制已启用: stop={self.distance_stop}m, step={self.step_size}m, wait={self.use_wait}")
+
+    def _get_workspace_root(self):
+        """获取工作空间根目录（tracking_with_cameara_ws）"""
+        current_file_dir = os.path.dirname(os.path.abspath(__file__))
+        path = current_file_dir
+        for _ in range(10):
+            if os.path.basename(path) == 'tracking_with_cameara_ws':
+                return path
+            parent = os.path.dirname(path)
+            if parent == path:
+                break
+            path = parent
+        return None
 
     def cb_points(self, msg: PointCloud):
         if self.robot is None:

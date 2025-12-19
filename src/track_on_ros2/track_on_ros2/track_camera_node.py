@@ -70,10 +70,17 @@ def find_track_on_path():
         if os.path.isdir(src_track_on) and os.path.isfile(os.path.join(src_track_on, 'tracking_module.py')):
             return src_track_on
     
-    # 方法4: 使用已知的工作空间路径（硬编码作为最后手段）
-    known_path = '/home/root1/Corenetic/code/project/tracking_with_cameara_ws/src/track_on'
-    if os.path.isdir(known_path) and os.path.isfile(os.path.join(known_path, 'tracking_module.py')):
-        return known_path
+    # 方法4: 使用相对路径从当前文件位置查找（作为最后手段）
+    current_file_dir = os.path.dirname(os.path.abspath(__file__))
+    ws_root = current_file_dir
+    for _ in range(5):
+        if os.path.basename(ws_root) == 'tracking_with_cameara_ws':
+            known_path = os.path.join(ws_root, 'src', 'track_on')
+            if os.path.isdir(known_path) and os.path.isfile(os.path.join(known_path, 'tracking_module.py')):
+                return known_path
+        ws_root = os.path.dirname(ws_root)
+        if ws_root == os.path.dirname(ws_root):
+            break
     
     return None
 

@@ -56,10 +56,18 @@ def find_track_on_path():
                     if os.path.isdir(src_track_on):
                         return src_track_on
 
-    # fallback
-    known_path = '/home/root1/Corenetic/code/project/tracking_with_cameara_ws/src/track_on'
-    if os.path.isdir(known_path):
-        return known_path
+    # fallback: 使用相对路径从当前文件位置查找
+    current_file_dir = os.path.dirname(os.path.abspath(__file__))
+    # 尝试从当前文件向上查找工作空间根目录
+    ws_root = current_file_dir
+    for _ in range(5):
+        if os.path.basename(ws_root) == 'tracking_with_cameara_ws':
+            known_path = os.path.join(ws_root, 'src', 'track_on')
+            if os.path.isdir(known_path):
+                return known_path
+        ws_root = os.path.dirname(ws_root)
+        if ws_root == os.path.dirname(ws_root):
+            break
 
     return None
 
@@ -188,7 +196,10 @@ class TrackCameraFrontMinNode(Node):
 
         # 3D 相关
         # 默认从指定文件读取相机内参（像素单位）
-        self.declare_parameter('intrinsics_file', '/home/root1/Corenetic/code/project/tracking_with_cameara_ws/camera_rhead_front_intrinsics_02_10.txt')
+        # 获取工作空间根目录
+        ws_root = self._get_workspace_root()
+        default_intrinsics = os.path.join(ws_root, 'camera_rhead_front_intrinsics_02_10.txt') if ws_root else ''
+        self.declare_parameter('intrinsics_file', default_intrinsics)
         self.declare_parameter('depth_topic', '/right/depth/stream')
         self.declare_parameter('depth_scale', 0.001)
         self.declare_parameter('print_3d', True)
@@ -747,6 +758,22 @@ class TrackCameraFrontMinNode(Node):
         if event == cv2.EVENT_LBUTTONDOWN and not self.tracking_started:
             self.selected_points.append([x, y])
             self.get_logger().info(f"添加点 {len(self.selected_points)}: ({x},{y})")
+
+    ############################################
+    # 获取工作空间根目录
+    ############################################
+    def _get_workspace_root(self):
+        """获取工作空间根目录（tracking_with_cameara_ws）"""
+        current_file_dir = os.path.dirname(os.path.abspath(__file__))
+        path = current_file_dir
+        for _ in range(10):
+            if os.path.basename(path) == 'tracking_with_cameara_ws':
+                return path
+            parent = os.path.dirname(path)
+            if parent == path:
+                break
+            path = parent
+        return None
 
     ############################################
     # 加载相机内参

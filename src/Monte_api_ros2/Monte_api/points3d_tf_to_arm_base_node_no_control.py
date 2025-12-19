@@ -126,7 +126,9 @@ class Points3DTFToArmBaseNode(Node):
         self.declare_parameter('publish_transformed', True)
         self.declare_parameter('print_limit', 10)
         # 外参文件 + 方向 + 坐标系约定
-        self.declare_parameter('wrist_extrinsic_file', '/home/root1/Corenetic/code/project/tracking_with_cameara_ws/joint_r7_wrist_roll.txt')
+        ws_root = self._get_workspace_root()
+        default_extrinsic = os.path.join(ws_root, 'joint_r7_wrist_roll.txt') if ws_root else ''
+        self.declare_parameter('wrist_extrinsic_file', default_extrinsic)
         self.declare_parameter('invert_extrinsic', False)  # 若文件给的是 T_{source<-wrist}，则置 True 取逆
         # 若外参以相机笛卡尔坐标（x前,y左,z上）为源，而输入为光学坐标（x右,y下,z前），需先做 optical->camera 固定旋转
         self.declare_parameter('apply_optical_to_camera_rotation', False)  # 与参考代码一致，默认 False
@@ -179,6 +181,19 @@ class Points3DTFToArmBaseNode(Node):
         self.pub = None
         if self.publish_transformed:
             self.pub = self.create_publisher(PointCloud, 'tracking/points3d_in_arm_base', 10)
+
+    def _get_workspace_root(self):
+        """获取工作空间根目录（tracking_with_cameara_ws）"""
+        current_file_dir = os.path.dirname(os.path.abspath(__file__))
+        path = current_file_dir
+        for _ in range(10):
+            if os.path.basename(path) == 'tracking_with_cameara_ws':
+                return path
+            parent = os.path.dirname(path)
+            if parent == path:
+                break
+            path = parent
+        return None
 
     def _extract_channel(self, msg: PointCloud, name: str):
         try:

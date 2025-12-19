@@ -110,7 +110,9 @@ class Points3DTestPublisher(Node):
         self.declare_parameter('target_frame', 'link_r0_arm_base')
         self.declare_parameter('subscribe_base', True)
 
-        self.declare_parameter('wrist_extrinsic_file', '/home/root1/Corenetic/code/project/tracking_with_cameara_ws/joint_r7_wrist_roll.txt')
+        ws_root = self._get_workspace_root()
+        default_extrinsic = os.path.join(ws_root, 'joint_r7_wrist_roll.txt') if ws_root else ''
+        self.declare_parameter('wrist_extrinsic_file', default_extrinsic)
         self.declare_parameter('invert_extrinsic', False)
         self.declare_parameter('apply_optical_to_camera_rotation', False)
 
@@ -182,6 +184,19 @@ class Points3DTestPublisher(Node):
         self.get_logger().info(
             f'📌 发布固定点到 {self.input_topic}, point=({self.pt_x},{self.pt_y},{self.pt_z})'
         )
+
+    def _get_workspace_root(self):
+        """获取工作空间根目录（tracking_with_cameara_ws）"""
+        current_file_dir = os.path.dirname(os.path.abspath(__file__))
+        path = current_file_dir
+        for _ in range(10):
+            if os.path.basename(path) == 'tracking_with_cameara_ws':
+                return path
+            parent = os.path.dirname(path)
+            if parent == path:
+                break
+            path = parent
+        return None
 
     def _optical_to_camera(self, pts: np.ndarray) -> np.ndarray:
         # Astra / RealSense optical == camera? Assume identity

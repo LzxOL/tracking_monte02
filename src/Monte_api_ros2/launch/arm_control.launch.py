@@ -1,3 +1,4 @@
+import os
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
@@ -7,17 +8,36 @@ from launch_ros.actions import Node
 # 用法：
 #   ros2 launch Monte_api_ros2 arm_control.launch.py \
 #       robot_ip:=192.168.22.63:50051 \
-#       robot_lib_path:=/home/root1/Corenetic/code/project/tracking_with_cameara_ws/src/Monte_api_ros2/lib \
 #       component:=1 interactive:=false
 
+def get_workspace_root():
+    """获取工作空间根目录"""
+    current_file = os.path.abspath(__file__)
+    path = os.path.dirname(current_file)
+    for _ in range(10):
+        if os.path.basename(path) == 'tracking_with_cameara_ws':
+            return path
+        parent = os.path.dirname(path)
+        if parent == path:
+            break
+        path = parent
+    return None
+
+
 def generate_launch_description() -> LaunchDescription:
+    ws_root = get_workspace_root()
+    if ws_root:
+        default_lib_path = os.path.join(ws_root, 'src', 'Monte_api_ros2', 'lib')
+    else:
+        default_lib_path = ''
+    
     robot_ip_arg = DeclareLaunchArgument(
         'robot_ip', default_value='192.168.22.63:50051',
         description='Robot gRPC server ip:port'
     )
     robot_lib_path_arg = DeclareLaunchArgument(
         'robot_lib_path',
-        default_value='/home/root1/Corenetic/code/project/tracking_with_cameara_ws/src/Monte_api_ros2/lib',
+        default_value=default_lib_path,
         description='Path to RobotLib .so directory'
     )
     component_arg = DeclareLaunchArgument(

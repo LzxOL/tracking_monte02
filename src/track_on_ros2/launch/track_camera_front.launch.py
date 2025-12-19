@@ -1,13 +1,32 @@
+import os
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
+def get_workspace_root():
+    """获取工作空间根目录"""
+    current_file = os.path.abspath(__file__)
+    path = os.path.dirname(current_file)
+    for _ in range(10):
+        if os.path.basename(path) == 'tracking_with_cameara_ws':
+            return path
+        parent = os.path.dirname(path)
+        if parent == path:
+            break
+        path = parent
+    return None
+
+
 def generate_launch_description():
-    # 使用硬编码的绝对路径作为默认值（更可靠）
-    default_checkpoint_path_str = '/home/root1/Corenetic/code/project/tracking_with_cameara_ws/src/track_on/checkpoints/track_on_checkpoint.pt'
-    default_intrinsics_file_str = '/home/root1/Corenetic/code/project/tracking_with_cameara_ws/camera_head_front_intrinsics.txt'
+    ws_root = get_workspace_root()
+    if ws_root:
+        default_checkpoint_path_str = os.path.join(ws_root, 'src', 'track_on', 'checkpoints', 'track_on_checkpoint.pt')
+        default_intrinsics_file_str = os.path.join(ws_root, 'camera_head_front_intrinsics.txt')
+    else:
+        default_checkpoint_path_str = ''
+        default_intrinsics_file_str = ''
     
     return LaunchDescription([
         DeclareLaunchArgument(

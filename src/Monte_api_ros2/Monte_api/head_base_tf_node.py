@@ -21,7 +21,12 @@ class HeadBaseTFNode(Node):
 
         # 参数
         self.declare_parameter('robot_ip', '192.168.22.63:50051')
-        self.declare_parameter('robot_lib_path', '/home/root1/Corenetic/code/project/tracking_with_cameara_ws/src/Monte_api_ros2/lib')
+        try:
+            from ament_index_python.packages import get_package_share_directory  # type: ignore
+            default_lib = os.path.join(get_package_share_directory('Monte_api_ros2'), 'lib')
+        except Exception:
+            default_lib = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'lib')
+        self.declare_parameter('robot_lib_path', default_lib)
         self.declare_parameter('parent_frame', 'link_l0_arm_base')
         self.declare_parameter('child_frame', 'left_camera_color_optical_frame')
         self.declare_parameter('rate', 2.0)  # Hz

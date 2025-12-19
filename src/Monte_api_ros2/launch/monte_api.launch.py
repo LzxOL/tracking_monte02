@@ -1,3 +1,4 @@
+import os
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
@@ -8,16 +9,34 @@ from launch_ros.actions import Node
 # 用法示例：
 #   1) 仅启动 TF 节点（默认）
 #      ros2 launch Monte_api_ros2 monte_api.launch.py
-#   2) 指定机器人 IP、库路径
-#      ros2 launch Monte_api_ros2 monte_api.launch.py robot_ip:=192.168.22.63:50051 \
-#           robot_lib_path:="/home/root1/Corenetic/code/project/tracking_with_cameara_ws/src/Monte_api_ros2/lib"
+#   2) 指定机器人 IP
+#      ros2 launch Monte_api_ros2 monte_api.launch.py robot_ip:=192.168.22.63:50051
 #   3) 启动控制节点（并关闭 TF 节点）
 #      ros2 launch Monte_api_ros2 monte_api.launch.py run_arm_control:=true run_tf_node:=false interactive:=false component:=1
 #   4) 同时启动两个节点
 #      ros2 launch Monte_api_ros2 monte_api.launch.py run_arm_control:=true
 
+def get_workspace_root():
+    """获取工作空间根目录"""
+    current_file = os.path.abspath(__file__)
+    path = os.path.dirname(current_file)
+    for _ in range(10):
+        if os.path.basename(path) == 'tracking_with_cameara_ws':
+            return path
+        parent = os.path.dirname(path)
+        if parent == path:
+            break
+        path = parent
+    return None
+
 
 def generate_launch_description() -> LaunchDescription:
+    ws_root = get_workspace_root()
+    if ws_root:
+        default_lib_path = os.path.join(ws_root, 'src', 'Monte_api_ros2', 'lib')
+    else:
+        default_lib_path = ''
+    
     # ---------- 通用参数 ----------
     robot_ip_arg = DeclareLaunchArgument(
         'robot_ip', default_value='192.168.22.63:50051',
@@ -25,8 +44,7 @@ def generate_launch_description() -> LaunchDescription:
     )
     robot_lib_path_arg = DeclareLaunchArgument(
         'robot_lib_path',
-        # 默认按当前工作区源码路径（请按需修改）
-        default_value='/home/root1/Corenetic/code/project/tracking_with_cameara_ws/src/Monte_api_ros2/lib',
+        default_value=default_lib_path,
         description='Path to RobotLib .so directory'
     )
 
