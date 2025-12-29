@@ -10,7 +10,7 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
-        ('share/' + package_name + '/launch', ['launch/track_camera.launch.py', 'launch/track_camera_orbbec.launch.py', 'launch/track_camera_front.launch.py', 'launch/track_camera_front_min.launch.py']),
+        ('share/' + package_name + '/launch', ['launch/track_camera.launch.py', 'launch/track_camera_front.launch.py', 'launch/track_camera_front_min.launch.py']),
         ('share/' + package_name + '/config', ['config/config.yaml']),
     ],
     install_requires=['setuptools', 'rclpy', 'tf2_ros', 'sensor_msgs', 'cv_bridge', 'pyyaml'],
@@ -23,7 +23,7 @@ setup(
     entry_points={
         'console_scripts': [
             'track_camera_node = track_on_ros2.track_camera_node:main',
-            'track_camera_orbbec_node = track_on_ros2.track_camera_orbbec_node:main',
+            # 'track_camera_orbbec_node = track_on_ros2.track_camera_orbbec_node:main',  # 已ignore
             'track_camera_front_node = track_on_ros2.track_camera_front_node:main',
             'track_camera_front_min_node = track_on_ros2.track_camera_front_min_node:main',
         ],

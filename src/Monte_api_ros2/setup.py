@@ -25,7 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
             'head_base_tf_node=Monte_api.head_base_tf_node:main',
-            'arm_control_node=Monte_api.control_node:main',
+            # 'arm_control_node=Monte_api.control_node:main',  # 已ignore
             'points3d_tf_to_arm_base_node=Monte_api.points3d_tf_to_arm_base_node:main',
             'points3d_test_publisher=Monte_api.points3d_test_publisher:main',
         ],
